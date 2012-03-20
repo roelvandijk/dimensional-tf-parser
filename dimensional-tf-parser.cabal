@@ -1,0 +1,31 @@
+name:          dimensional-tf-parser
+version:       0.0.0
+cabal-version: >= 1.8
+build-type:    Simple
+stability:     experimental
+author:        Roel van Dijk <vandijk.roel@gmail.com>
+maintainer:    Roel van Dijk <vandijk.roel@gmail.com>
+copyright:     2012 Roel van Dijk
+license:       BSD3
+license-file:  LICENSE
+homepage:      https://github.com/roelvandijk/dimensional-tf-parser
+bug-reports:   https://github.com/roelvandijk/dimensional-tf-parser/issues
+category:
+synopsis:      Parse SI units
+
+-------------------------------------------------------------------------------
+
+source-repository head
+  Type: git
+  Location: git://github.com/roelvandijk/dimensional-tf-parser.git
+
+-------------------------------------------------------------------------------
+
+library
+  hs-source-dirs: src
+  ghc-options: -Wall -Werror
+
+  build-depends: base           >= 3.0.3.1 && < 4.6
+               , dimensional-tf >= 0.1.1   && < 0.2
+
+  exposed-modules: Numeric.Units.Dimensional.TF.Parser
