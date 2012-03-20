@@ -20,12 +20,10 @@ module Numeric.Units.Dimensional.TF.Parser
 -- Imports
 --------------------------------------------------------------------------------
 
-import "base" Control.Arrow ( (>>>) )
-import "base" Data.Bool     ( otherwise, (&&) )
+import "base" Data.Bool     ( otherwise )
 import "base" Data.Char     ( isSpace )
 import "base" Data.Either   ( Either(Left, Right) )
-import "base" Data.Eq       ( (==) )
-import "base" Data.Function ( (.), ($) )
+import "base" Data.Function ( ($) )
 import "base" Data.Int      ( Int )
 import "base" Data.List     ( (++), break, concat, drop, dropWhile
                             , find, isPrefixOf, isSuffixOf, length, reverse
@@ -36,6 +34,10 @@ import "base" Data.String   ( String )
 import "base" Data.Tuple    ( fst )
 import "base" Prelude       ( Fractional, Floating, (^^) )
 import "base" Text.Read     ( Read, reads, lex )
+import "base-unicode-symbols" Control.Arrow.Unicode ( (⋙) )
+import "base-unicode-symbols" Data.Bool.Unicode     ( (∧) )
+import "base-unicode-symbols" Data.Eq.Unicode       ( (≡) )
+import "base-unicode-symbols" Data.Function.Unicode ( (∘) )
 import "dimensional-tf" Numeric.Units.Dimensional.TF
 import "dimensional-tf" Numeric.Units.Dimensional.TF.SIUnits
 import "dimensional-tf" Numeric.Units.Dimensional.TF.NonSI
@@ -58,7 +60,7 @@ parseAtomicUnit prefixes units str =
     case (tryPrefix, tryUnit) of
       (Nothing, Nothing) → Left (length str, "Can't parse: " ++ str)
       (Nothing, Just (us, u))
-          | us == str → Right u
+          | us ≡ str  → Right u
           | otherwise → let unknown = dropEnd (length us) str
                         in Left ( length unknown
                                 , concat [ "Unknown prefix: "
@@ -67,19 +69,19 @@ parseAtomicUnit prefixes units str =
                                          ]
                                 )
       (Just (pfs, _), Nothing)
-          | pfs == str → Left (0, "Prefix found, unit is missing: " ++ brackets pfs)
-          | otherwise  → let unknown = drop (length pfs) str
-                         in Left ( length unknown
-                                 , concat [ "Prefix found, unknown unit: "
-                                          , brackets pfs
-                                          , unknown
-                                          ]
-                                 )
+          | pfs ≡ str → Left (0, "Prefix found, unit is missing: " ++ brackets pfs)
+          | otherwise → let unknown = drop (length pfs) str
+                        in Left ( length unknown
+                                , concat [ "Prefix found, unknown unit: "
+                                         , brackets pfs
+                                         , unknown
+                                         ]
+                                )
       (Just (pfs, pf), Just (us, u))
           -- Special case when prefix and unit are identical
           -- (consider "m" = milli and "m" = metre).
-          | (pfs == str) && (us == str) → Right u
-          | pfs ++ us == str → Right $ pf u
+          | (pfs ≡ str) ∧ (us ≡ str) → Right u
+          | pfs ++ us ≡ str → Right $ pf u
           | otherwise → let unknown = dropEnd (length us) (drop (length pfs) str)
                         in Left ( length unknown
                                 , concat [ "Can't parse: "
@@ -89,8 +91,8 @@ parseAtomicUnit prefixes units str =
                                          ]
                                 )
   where
-    tryPrefix = find (fst >>> (`isPrefixOf` str)) prefixes
-    tryUnit   = find (fst >>> (`isSuffixOf` str)) units
+    tryPrefix = find (fst ⋙ (`isPrefixOf` str)) prefixes
+    tryUnit   = find (fst ⋙ (`isSuffixOf` str)) units
 
 parse ∷ (Fractional α, Read α)
       ⇒ [PrefixItem dim α]
@@ -223,7 +225,8 @@ instance DimUnits DLuminousIntensity where
     dimUnitSymbols = [ ("cd",      candela) ]
 
 
-polyParse ∷ (DimUnits dim, Floating α, Read α) ⇒ String → Either String (Quantity dim α)
+polyParse ∷ (DimUnits dim, Floating α, Read α)
+          ⇒ String → Either String (Quantity dim α)
 polyParse = parseSI dimUnitNames dimUnitSymbols
 
 
@@ -270,10 +273,10 @@ siPrefixSymbols =
 readMay ∷ (Read α) ⇒ String → Maybe α
 readMay s = case [x | (x,t) ← reads s, ("","") ← lex t] of
                 [x] → Just x
-                _ → Nothing
+                _   → Nothing
 
 dropEnd ∷ Int → [α] → [α]
-dropEnd n = reverse . drop n . reverse
+dropEnd n = reverse ∘ drop n ∘ reverse
 
 brackets ∷ String → String
 brackets s = "[" ++ s ++ "]"
