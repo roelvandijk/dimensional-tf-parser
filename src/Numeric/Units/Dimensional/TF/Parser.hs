@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances
            , NoImplicitPrelude
            , PackageImports
+           , ScopedTypeVariables
            , TypeSynonymInstances
            , UnicodeSyntax
   #-}
@@ -20,27 +21,36 @@ module Numeric.Units.Dimensional.TF.Parser
 -- Imports
 --------------------------------------------------------------------------------
 
+import qualified "base" Control.Arrow as Arr ( second )
 import "base" Data.Bool     ( otherwise )
 import "base" Data.Char     ( isSpace )
-import "base" Data.Either   ( Either(Left, Right) )
-import "base" Data.Function ( ($) )
+import "base" Data.Either   ( Either(Left, Right), either )
+import "base" Data.Function ( ($), id )
 import "base" Data.Int      ( Int )
-import "base" Data.List     ( (++), break, concat, drop, dropWhile
-                            , find, isPrefixOf, isSuffixOf, length, reverse
+import "base" Data.List     ( (++), break, concat, drop, dropWhile, find
+                            , isPrefixOf, isSuffixOf, length, map, reverse
                             )
 import "base" Data.Maybe    ( Maybe(Nothing, Just) )
 import "base" Data.Ord      ( (<) )
-import "base" Data.String   ( String )
+import "base" Data.String   ( String, words )
 import "base" Data.Tuple    ( fst )
-import "base" Prelude       ( Fractional, Floating, (^^) )
+import "base" Prelude       ( Fractional, Floating, (^^), error )
 import "base" Text.Read     ( Read, reads, lex )
+import "base" Text.Show     ( show )
 import "base-unicode-symbols" Control.Arrow.Unicode ( (⋙) )
 import "base-unicode-symbols" Data.Bool.Unicode     ( (∧) )
 import "base-unicode-symbols" Data.Eq.Unicode       ( (≡) )
 import "base-unicode-symbols" Data.Function.Unicode ( (∘) )
+import "base-unicode-symbols" Prelude.Unicode       ( (⊥) )
 import "dimensional-tf" Numeric.Units.Dimensional.TF
 import "dimensional-tf" Numeric.Units.Dimensional.TF.SIUnits
 import "dimensional-tf" Numeric.Units.Dimensional.TF.NonSI
+import "numtype-tf"     Numeric.NumType.TF ( NumType, toNum )
+import "this" Numeric.Units.Dimensional.TF.Parser.Unit
+    ( UnitExp, parseUnitExp )
+
+import "dimensional-tf" Numeric.Units.Dimensional.TF.Quantities
+import "base" Prelude ( Double )
 
 
 --------------------------------------------------------------------------------
@@ -51,12 +61,12 @@ type PrefixItem dim α = (String, Unit dim α → Unit dim α)
 type UnitItem dim α = (String, Unit dim α)
 
 -- "[PREFIX]UNIT"
-parseAtomicUnit ∷ (Fractional α)
-                ⇒ [PrefixItem dim α]
-                → [UnitItem dim α]
-                → String
-                → Either (Int, String) (Unit dim α)
-parseAtomicUnit prefixes units str =
+parseBaseUnit ∷ (Fractional α)
+              ⇒ [PrefixItem dim α]
+              → [UnitItem dim α]
+              → String
+              → Either (Int, String) (Unit dim α)
+parseBaseUnit prefixes units str =
     case (tryPrefix, tryUnit) of
       (Nothing, Nothing) → Left (length str, "Can't parse: " ++ str)
       (Nothing, Just (us, u))
@@ -94,6 +104,30 @@ parseAtomicUnit prefixes units str =
     tryPrefix = find (fst ⋙ (`isPrefixOf` str)) prefixes
     tryUnit   = find (fst ⋙ (`isSuffixOf` str)) units
 
+-- TODO: use the new unit expression parser…
+
+-- parseCombinedUnit' ∷ ∀ l m t i th n j α
+--                    . ( NumType l,  NumType m, NumType t, NumType i
+--                      , NumType th, NumType n, NumType j
+--                      , Fractional α
+--                      )
+--                    ⇒ [(String, Int)]
+--                    → Either (Int, String) (Unit (Dim l m t i th n j) α)
+-- parseCombinedUnit' xs = Left (0, "TODO")
+--   where
+--     ys ∷ [(String, String, Maybe Int)]
+--     ys = map (\(us, ps) → (us, ps, readMay ps)) xs
+
+--     l  = toNum ((⊥) ∷ l)
+--     m  = toNum ((⊥) ∷ m)
+--     t  = toNum ((⊥) ∷ t)
+--     i  = toNum ((⊥) ∷ i)
+--     th = toNum ((⊥) ∷ th)
+--     n  = toNum ((⊥) ∷ n)
+--     j  = toNum ((⊥) ∷ j)
+
+-- 1 0 -1 0 0 0 0
+
 parse ∷ (Fractional α, Read α)
       ⇒ [PrefixItem dim α]
       → [UnitItem   dim α]
@@ -108,7 +142,7 @@ parse prefixes units str =
           Right unit → Right $ val *~ unit
   where (valStr, unitStr') = break isSpace str
         unitStr = dropWhile isSpace unitStr'
-        unitEtr = parseAtomicUnit prefixes units unitStr
+        unitEtr = parseBaseUnit prefixes units unitStr
         valMay = readMay valStr
 
 parse' ∷ (Fractional α, Read α)
@@ -139,9 +173,13 @@ parseSI ∷ (Fractional α, Read α)
         → Either String (Quantity dim α)
 parseSI = parse' siPrefixNames siPrefixSymbols
 
+polyParse ∷ (DimUnits dim, Floating α, Read α)
+          ⇒ String → Either String (Quantity dim α)
+polyParse = parseSI dimUnitNames dimUnitSymbols
+
 
 --------------------------------------------------------------------------------
--- Polymorphic parsing
+-- DimUnits
 --------------------------------------------------------------------------------
 
 class DimUnits dim where
@@ -149,9 +187,7 @@ class DimUnits dim where
     dimUnitSymbols ∷ (Floating α) ⇒ [UnitItem dim α]
 
 instance DimUnits DOne where
-    dimUnitNames   = [ ("radian",      one)
-                     , ("steradian",   one)
-                     , ("revolution",  one)
+    dimUnitNames   = [ ("revolution",  one)
                      , ("solid",       one)
                      , ("degree",      degree)
                      , ("arcminute",   arcminute)
@@ -208,13 +244,8 @@ instance DimUnits DElectricCurrent where
     dimUnitSymbols = [ ("A",      ampere) ]
 
 instance DimUnits DThermodynamicTemperature where
-    dimUnitNames   = [ ("kelvin",         kelvin)
-                     , ("degree Celsius", degreeCelsius)
-                     ]
-    dimUnitSymbols = [ ("K",  kelvin)
-                     , ("°C", degreeCelsius)
-                     , ("℃",  degreeCelsius)
-                     ]
+    dimUnitNames   = [("kelvin", kelvin)]
+    dimUnitSymbols = [("K",  kelvin)]
 
 instance DimUnits DAmountOfSubstance where
     dimUnitNames   = [ ("mole", mole) ]
@@ -223,12 +254,6 @@ instance DimUnits DAmountOfSubstance where
 instance DimUnits DLuminousIntensity where
     dimUnitNames   = [ ("candela", candela) ]
     dimUnitSymbols = [ ("cd",      candela) ]
-
-
-polyParse ∷ (DimUnits dim, Floating α, Read α)
-          ⇒ String → Either String (Quantity dim α)
-polyParse = parseSI dimUnitNames dimUnitSymbols
-
 
 
 --------------------------------------------------------------------------------
@@ -266,12 +291,73 @@ siPrefixSymbols =
 
 
 --------------------------------------------------------------------------------
+-- Derived units
+--------------------------------------------------------------------------------
+
+unsafePUE ∷ String → UnitExp
+unsafePUE = either (error ∘ show) id ∘ parseUnitExp
+
+derivedUnitNames ∷ [(String, UnitExp)]
+derivedUnitNames =
+  [ ("radian",         unsafePUE "metre/metre")
+  , ("steradian",      unsafePUE "metre²/metre²")
+  , ("hertz",          unsafePUE "second⁻¹")
+  , ("newton",         unsafePUE "metre · kilogram · second⁻²")
+  , ("pascal",         unsafePUE "newton/metre²")
+  , ("joule",          unsafePUE "newton · metre")
+  , ("watt",           unsafePUE "joule/second")
+  , ("coulomb",        unsafePUE "second · ampere")
+  , ("volt",           unsafePUE "watt/ampere")
+  , ("farad",          unsafePUE "coulomb/volt")
+  , ("ohm",            unsafePUE "volt/ampere")
+  , ("siemens",        unsafePUE "ampere/volt")
+  , ("weber",          unsafePUE "volt · second")
+  , ("tesla",          unsafePUE "weber/metre²")
+  , ("henry",          unsafePUE "weber/ampere")
+  , ("degree Celsius", unsafePUE "kelvin")
+  , ("lumen",          unsafePUE "candela · steradian")
+  , ("lux",            unsafePUE "lumen/metre²")
+  , ("becquerel",      unsafePUE "second⁻¹")
+  , ("gray",           unsafePUE "joule/kilogram")
+  , ("sievert",        unsafePUE "joule/kilogram")
+  , ("katal",          unsafePUE "second⁻¹ · mole")
+  ]
+
+derivedUnitSymbols ∷ [(String, UnitExp)]
+derivedUnitSymbols =
+  [ ("rad", unsafePUE "m/m")
+  , ("sr",  unsafePUE "m²/m²")
+  , ("Hz",  unsafePUE "s⁻¹")
+  , ("N",   unsafePUE "m · kg · s⁻²")
+  , ("Pa",  unsafePUE "N/m²")
+  , ("J",   unsafePUE "N · m")
+  , ("W",   unsafePUE "J/s")
+  , ("C",   unsafePUE "s · A")
+  , ("V",   unsafePUE "W/A")
+  , ("F",   unsafePUE "C/V")
+  , ("Ω",   unsafePUE "V/A")
+  , ("S",   unsafePUE "A/V")
+  , ("Wb",  unsafePUE "V · s")
+  , ("T",   unsafePUE "Wb/m²")
+  , ("H",   unsafePUE "Wb/A")
+  , ("℃",  unsafePUE "K")
+  , ("°C",  unsafePUE "K")
+  , ("lm",  unsafePUE "cd · sr")
+  , ("lx",  unsafePUE "lm/m²")
+  , ("Bq",  unsafePUE "s⁻¹")
+  , ("Gy",  unsafePUE "J/kg")
+  , ("Sv",  unsafePUE "J/kg")
+  , ("kat", unsafePUE "s⁻¹ · mol")
+  ]
+
+
+--------------------------------------------------------------------------------
 -- Utils
 --------------------------------------------------------------------------------
 
 -- Copied from safe-0.3.3 by Neil Mitchell.
 readMay ∷ (Read α) ⇒ String → Maybe α
-readMay s = case [x | (x,t) ← reads s, ("","") ← lex t] of
+readMay s = case [x | (x,t) ← reads s, ("", "") ← lex t] of
                 [x] → Just x
                 _   → Nothing
 
