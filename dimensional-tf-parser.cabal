@@ -34,4 +34,3 @@ library
                , transformers         >= 0.2.2.0 && < 0.3
 
   exposed-modules: Numeric.Units.Dimensional.TF.Parser
-                 , Numeric.Units.Dimensional.TF.Parser.Unit
