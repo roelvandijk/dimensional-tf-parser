@@ -6,7 +6,7 @@
            , UnicodeSyntax
   #-}
 
-module Numeric.Units.Dimensional.TF.Parser.Unit where
+module Numeric.Units.Dimensional.TF.Parser where
 
 --------------------------------------------------------------------------------
 -- Imports
@@ -94,7 +94,7 @@ prettyDimPows (DimPows l m t i th n j) =
   where
     f ∷ ℤ → String → String
     f 0 _ = ""
-    f n sym = sym ++ map super (show n)
+    f e sym = sym ++ map super (show e)
 
     super ∷ Char → Char
     super '-' = '⁻'
@@ -231,13 +231,13 @@ unitExp = buildExpressionParser table term
 
     term ∷ Parsec String () UnitExpParsed
     term = (P.parens lexer unitExp)
-         <|> try (UEPowP <$> unitName <*> unitSuperExp)
-         <|> P.lexeme lexer unitName
+         <|> try (UEPowP <$> unitTerm <*> unitSuperExp)
+         <|> P.lexeme lexer unitTerm
          <|> UEIntP <$> P.integer lexer
 
 -- [prefix_name] unit_name | [prefix_symbol] unit_symbol
-unitName ∷ Parsec String () UnitExpParsed
-unitName = try onlyNames <|> onlySymbols
+unitTerm ∷ Parsec String () UnitExpParsed
+unitTerm = try onlyNames <|> onlySymbols
   where
     onlyNames   = unit siPrefixNames   unitNames
     onlySymbols = unit siPrefixSymbols unitSymbols
@@ -249,8 +249,8 @@ unitName = try onlyNames <|> onlySymbols
         try (prefixedUnit prefixTable unitTable)
         <|> unitName unitTable
 
-    prefixedUnit prefixTable unitTable = UEPrefixP <$> prefix prefixTable <*> unitName unitTable
-    prefix tab = choice $ map (try ∘ (\(s, x) → string s *> pure x)) tab
+    prefixedUnit prefixTable unitTable = UEPrefixP <$> prefixTerm prefixTable <*> unitName unitTable
+    prefixTerm tab = choice $ map (try ∘ (\(s, x) → string s *> pure x)) tab
     unitName tab = uncurry UENameP <$> choice (map (\t → try (string (fst t) *> pure t)) tab)
 
 unitSuperExp ∷ Parsec String () UnitExpParsed
@@ -287,53 +287,56 @@ superSign =   (char '⁻' *> pure negate)
 -- SI prefixes
 --------------------------------------------------------------------------------
 
+dec ∷ (Fractional α) ⇒ ℤ → α
+dec = (10 ^^)
+
 siPrefixNames ∷ (Fractional α) ⇒ [(String, α)]
 siPrefixNames =
-  [ ("yotta", 10 ^^   24)
-  , ("zetta", 10 ^^   21)
-  , ("exa",   10 ^^   18)
-  , ("peta",  10 ^^   15)
-  , ("tera",  10 ^^   12)
-  , ("giga",  10 ^^    9)
-  , ("mega",  10 ^^    6)
-  , ("kilo",  10 ^^    3)
-  , ("hecto", 10 ^^    2)
-  , ("deca",  10 ^^    1)
-  , ("deka",  10 ^^    1)
-  , ("deci",  10 ^^ (- 1))
-  , ("centi", 10 ^^ (- 2))
-  , ("milli", 10 ^^ (- 3))
-  , ("micro", 10 ^^ (- 6))
-  , ("nano",  10 ^^ (- 9))
-  , ("pico",  10 ^^ (-12))
-  , ("femto", 10 ^^ (-15))
-  , ("atto",  10 ^^ (-18))
-  , ("zepto", 10 ^^ (-21))
-  , ("yocto", 10 ^^ (-24))
+  [ ("yotta", dec   24)
+  , ("zetta", dec   21)
+  , ("exa",   dec   18)
+  , ("peta",  dec   15)
+  , ("tera",  dec   12)
+  , ("giga",  dec    9)
+  , ("mega",  dec    6)
+  , ("kilo",  dec    3)
+  , ("hecto", dec    2)
+  , ("deca",  dec    1)
+  , ("deka",  dec    1)
+  , ("deci",  dec (- 1))
+  , ("centi", dec (- 2))
+  , ("milli", dec (- 3))
+  , ("micro", dec (- 6))
+  , ("nano",  dec (- 9))
+  , ("pico",  dec (-12))
+  , ("femto", dec (-15))
+  , ("atto",  dec (-18))
+  , ("zepto", dec (-21))
+  , ("yocto", dec (-24))
   ]
 
 siPrefixSymbols ∷ (Fractional α) ⇒ [(String, α)]
 siPrefixSymbols =
-  [ ("Y",  10 ^^   24)
-  , ("Z",  10 ^^   21)
-  , ("E",  10 ^^   18)
-  , ("P",  10 ^^   15)
-  , ("T",  10 ^^   12)
-  , ("G",  10 ^^    9)
-  , ("M",  10 ^^    6)
-  , ("k",  10 ^^    3)
-  , ("h",  10 ^^    2)
-  , ("da", 10 ^^    1)
-  , ("d",  10 ^^ (- 1))
-  , ("c",  10 ^^ (- 2))
-  , ("m",  10 ^^ (- 3))
-  , ("μ",  10 ^^ (- 6))
-  , ("n",  10 ^^ (- 9))
-  , ("p",  10 ^^ (-12))
-  , ("f",  10 ^^ (-15))
-  , ("a",  10 ^^ (-18))
-  , ("z",  10 ^^ (-21))
-  , ("y",  10 ^^ (-24))
+  [ ("Y",  dec   24)
+  , ("Z",  dec   21)
+  , ("E",  dec   18)
+  , ("P",  dec   15)
+  , ("T",  dec   12)
+  , ("G",  dec    9)
+  , ("M",  dec    6)
+  , ("k",  dec    3)
+  , ("h",  dec    2)
+  , ("da", dec    1)
+  , ("d",  dec (- 1))
+  , ("c",  dec (- 2))
+  , ("m",  dec (- 3))
+  , ("μ",  dec (- 6))
+  , ("n",  dec (- 9))
+  , ("p",  dec (-12))
+  , ("f",  dec (-15))
+  , ("a",  dec (-18))
+  , ("z",  dec (-21))
+  , ("y",  dec (-24))
   ]
 
 
@@ -341,7 +344,7 @@ siPrefixSymbols =
 -- Units
 --------------------------------------------------------------------------------
 
-uDimPows ∷ ∀ l m t i th n j x α
+uDimPows ∷ ∀ l m t i th n j α
          . ( NumType l,  NumType m, NumType t, NumType i
            , NumType th, NumType n, NumType j
            )
@@ -395,7 +398,7 @@ lengthUnits =
     , ("ångström",     metre)
     ]
   , [ ("m", metre)
-    , ("Å", prefix (10 ^^ (-10 ∷ Int)) metre)
+    , ("Å", prefix (dec (-10)) metre)
     ]
   )
 
@@ -454,23 +457,23 @@ luminousIntensityUnits =
 baseUnitNames   ∷ [(String, DimPows)]
 baseUnitSymbols ∷ [(String, DimPows)]
 (baseUnitNames, baseUnitSymbols) =
-    ( concat [ f (fst dimensionlessUnits)
-             , f (fst amountOfSubstanceUnits)
-             , f (fst timeUnits)
-             , f (fst lengthUnits)
-             , f (fst massUnits)
-             , f (fst electricCurrentUnits)
-             , f (fst thermodynamicTemperatureUnits)
-             , f (fst luminousIntensityUnits)
+    ( concat [ f (fst (dimensionlessUnits            ∷ UnitDef DOne Double))
+             , f (fst (amountOfSubstanceUnits        ∷ UnitDef DAmountOfSubstance Double))
+             , f (fst (timeUnits                     ∷ UnitDef DTime Double))
+             , f (fst (lengthUnits                   ∷ UnitDef DLength Double))
+             , f (fst (massUnits                     ∷ UnitDef DMass Double))
+             , f (fst (electricCurrentUnits          ∷ UnitDef DElectricCurrent Double))
+             , f (fst (thermodynamicTemperatureUnits ∷ UnitDef DThermodynamicTemperature Double))
+             , f (fst (luminousIntensityUnits        ∷ UnitDef DLuminousIntensity Double))
              ]
-    , concat [ f (snd dimensionlessUnits)
-             , f (snd amountOfSubstanceUnits)
-             , f (snd timeUnits)
-             , f (snd lengthUnits)
-             , f (snd massUnits)
-             , f (snd electricCurrentUnits)
-             , f (snd thermodynamicTemperatureUnits)
-             , f (snd luminousIntensityUnits)
+    , concat [ f (snd (dimensionlessUnits            ∷ UnitDef DOne Double))
+             , f (snd (amountOfSubstanceUnits        ∷ UnitDef DAmountOfSubstance Double))
+             , f (snd (timeUnits                     ∷ UnitDef DTime Double))
+             , f (snd (lengthUnits                   ∷ UnitDef DLength Double))
+             , f (snd (massUnits                     ∷ UnitDef DMass Double))
+             , f (snd (electricCurrentUnits          ∷ UnitDef DElectricCurrent Double))
+             , f (snd (thermodynamicTemperatureUnits ∷ UnitDef DThermodynamicTemperature Double))
+             , f (snd (luminousIntensityUnits        ∷ UnitDef DLuminousIntensity Double))
              ]
     )
   where
@@ -549,15 +552,15 @@ normalisePrefix (UEDiv x y) =
     in (px / py, UEDiv x' y')
 normalisePrefix (UEPow x i) =
     let (px, x') = normalisePrefix x
-    in (px ^^ fromIntegral i, UEPow x' i)
+    in (px ^^ i, UEPow x' i)
 
 -- | Replaces derived units with equivalent expressions using only
 -- base SI units.
 toBase ∷ UnitExp → UnitExp
-toBase ueName@(UEName n _) = maybe ueName id (derivation n)
+toBase ueName@(UEName n _) = maybe ueName id derivation
  where
-   derivation ∷ String → Maybe UnitExp
-   derivation n = snd <$> find ((n ≡) ∘ fst) (derivedUnitNames ++ derivedUnitSymbols)
+   derivation ∷ Maybe UnitExp
+   derivation = snd <$> find ((n ≡) ∘ fst) (derivedUnitNames ++ derivedUnitSymbols)
 toBase (UEPrefix p x) = UEPrefix p (toBase x)
 toBase (UEMul x y) = UEMul (toBase x) (toBase y)
 toBase (UEDiv x y) = UEDiv (toBase x) (toBase y)
@@ -581,8 +584,8 @@ extractUnits ue = filter ((0 ≢) ∘ snd) <$> Map.assocs <$> go ue
     go (UEName n d)   = pure $ Map.insert (n, d) 1 Map.empty
     go (UEMul x y)    = Map.unionWith (+) <$> go x <*> go y
     go (UEPow x n)    = Map.map (⋅ n) <$> go x
-    go (UEPrefix p x) = throwError "extractUnits: can't deal with prefixes"
-    go (UEDiv x y)    = throwError "extractUnits: can't deal with division"
+    go (UEPrefix _ _) = throwError "extractUnits: can't deal with prefixes"
+    go (UEDiv _ _)    = throwError "extractUnits: can't deal with division"
 
 -- Copied from safe-0.3.3 by Neil Mitchell.
 readMay ∷ (Read α) ⇒ String → Maybe α
