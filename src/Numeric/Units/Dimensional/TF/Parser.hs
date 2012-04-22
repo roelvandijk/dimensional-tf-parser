@@ -1,10 +1,12 @@
-{-# LANGUAGE FlexibleContexts
-           , NoImplicitPrelude
-           , PackageImports
-           , ScopedTypeVariables
-           , TupleSections
-           , UnicodeSyntax
-  #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE NoImplicitPrelude   #-}
+{-# LANGUAGE PackageImports      #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE UnicodeSyntax       #-}
 
 module Numeric.Units.Dimensional.TF.Parser where
 
@@ -12,17 +14,19 @@ module Numeric.Units.Dimensional.TF.Parser where
 -- Imports
 --------------------------------------------------------------------------------
 
-import "base" Control.Applicative ( (<*>), (<*), (*>), (<|>), pure )
+import "base" Control.Applicative ( Applicative, pure, liftA2
+                                  , (<*>), (<*), (*>), (<|>)
+                                  )
 import qualified "base" Control.Arrow as Arr ( second )
-import "base" Control.Monad ( return, sequence )
+import "base" Control.Monad ( return, (=<<), sequence )
 import "base" Data.Bool     ( Bool(False, True), not )
 import "base" Data.Char     ( Char, isSpace )
 import "base" Data.Either   ( Either(Left, Right), either )
 import "base" Data.Eq       ( Eq )
 import "base" Data.Function ( ($), id )
-import "base" Data.Functor  ( (<$>), (<$) )
+import "base" Data.Functor  ( Functor, fmap, (<$>), (<$) )
 import "base" Data.Int      ( Int )
-import "base" Data.List     ( (++), map, foldl', foldr, null, concat
+import "base" Data.List     ( (++), map, foldl', foldr, null, concat, concatMap
                             , filter, find, intercalate, dropWhile, break
                             , genericReplicate
                             )
@@ -32,10 +36,13 @@ import "base" Data.String   ( String )
 import "base" Data.Tuple    ( fst, snd, uncurry )
 import "base" Prelude
     ( Num, Fractional, Floating, Double
-    , (+), (-), (*), (/), (^^), error, abs, signum, negate, fromInteger, fromIntegral
+    , (+), (-), (*), (/), (^^)
+    , error, abs, signum, negate, fromInteger, fromIntegral
+    , asTypeOf
     )
 import "base" Text.Read     ( Read, reads, lex )
 import "base" Text.Show     ( Show, show )
+import "base-unicode-symbols" Data.Bool.Unicode     ( (∧) )
 import "base-unicode-symbols" Data.Eq.Unicode       ( (≡), (≢) )
 import "base-unicode-symbols" Data.Function.Unicode ( (∘) )
 import "base-unicode-symbols" Prelude.Unicode       ( ℤ, ℚ, (⊥), (⋅) )
@@ -52,7 +59,9 @@ import "dimensional-tf" Numeric.Units.Dimensional.TF.SIUnits
 import "dimensional-tf" Numeric.Units.Dimensional.TF.NonSI
 import "mtl" Control.Monad.Error.Class ( MonadError, throwError )
 import "numtype-tf" Numeric.NumType.TF
-    ( NumType, Zero, toNum, pos1, pos2, pos3, pos4, neg1, neg2, neg3 )
+    ( NumType, Zero, toNum, pos1, pos2, pos3, pos4, neg1, neg2, neg3
+    , Abs, Add, Mul, Z(Z), S(S), N(N), Succ
+    )
 import "parsec" Text.Parsec.Char       ( char, letter, oneOf, string )
 import "parsec" Text.Parsec.Combinator ( many1, eof, choice )
 import "parsec" Text.Parsec.Error
@@ -70,16 +79,52 @@ import "transformers" Data.Functor.Identity ( Identity )
 
 
 -- DEBUG
---import Prelude
+-- import Prelude
+-- import System.IO ( IO )
+-- import Text.Printf ( printf )
+
 
 --------------------------------------------------------------------------------
 -- Products of powers of dimensions.
 --------------------------------------------------------------------------------
 
 -- | A 7-tuple containing the powers of the 7 base SI dimensions.
-data DimPows = DimPows ℤ ℤ ℤ ℤ ℤ ℤ ℤ deriving (Eq, Ord, Show)
+data DimPows α = DimPows
+                 { dpLength                   ∷ α
+                 , dpMass                     ∷ α
+                 , dpTime                     ∷ α
+                 , dpElectricCurrent          ∷ α
+                 , dpThermodynamicTemperature ∷ α
+                 , dpAmountOfSubstance        ∷ α
+                 , dpLuminousIntensity        ∷ α
+                 }
+               deriving (Eq, Ord, Show)
 
-prettyDimPows ∷ DimPows → String
+instance Functor DimPows where
+    fmap f (DimPows l m t i th n j) =
+        DimPows (f l) (f m) (f t) (f i) (f th) (f n) (f j)
+
+instance Applicative DimPows where
+    pure x = DimPows x x x x x x x
+    (DimPows fl fm ft fi fth fn fj) <*> (DimPows l m t i th n j) =
+        DimPows (fl l) (fm m) (ft t) (fi i) (fth th) (fn n) (fj j)
+
+-- | A dimension is made an instance of 'Num' by applying all operations
+-- elementwise to each of the 7 numerical powers.
+instance (Num α) ⇒ Num (DimPows α) where
+    (+)         = liftA2 (+)
+    (*)         = liftA2 (*)
+    (-)         = liftA2 (-)
+    negate      = fmap negate
+    abs         = fmap abs
+    signum      = fmap signum
+    fromInteger = pure ∘ fromInteger
+
+-- | Pretty representation of a dimension.
+--
+-- See also: NIST Special Publication 330, 2008 Edition: The International
+-- System of Units (SI), Section 1.3: Dimensions of Quantities
+prettyDimPows ∷ ∀ α. (Eq α, Num α, Show α) ⇒ DimPows α → String
 prettyDimPows (DimPows 0 0 0 0 0  0 0) = "dimensionless"
 prettyDimPows (DimPows l m t i th n j) =
     concat $ filter (not ∘ null)
@@ -92,7 +137,7 @@ prettyDimPows (DimPows l m t i th n j) =
                     , f j "J"
                     ]
   where
-    f ∷ ℤ → String → String
+    f ∷ α → String → String
     f 0 _ = ""
     f e sym = sym ++ map super (show e)
 
@@ -110,37 +155,12 @@ prettyDimPows (DimPows l m t i th n j) =
     super '9' = '⁹'
     super c = c
 
-instance Num DimPows where
-    (+)    = dimValBinOp (+)
-    (*)    = dimValBinOp (*)
-    (-)    = dimValBinOp (-)
-    negate = dimValUnOp negate
-    abs    = dimValUnOp abs
-    signum = dimValUnOp signum
-    fromInteger n = DimPows n n n n n n n
-
-dimValUnOp ∷ (ℤ → ℤ) → DimPows → DimPows
-dimValUnOp f (DimPows l m t i th n j) =
-    DimPows (f l) (f m) (f t) (f i) (f th) (f n) (f j)
-
-dimValBinOp ∷ (ℤ → ℤ → ℤ) → DimPows → DimPows → DimPows
-dimValBinOp f (DimPows l₁ m₁ t₁ i₁ th₁ n₁ j₁)
-              (DimPows l₂ m₂ t₂ i₂ th₂ n₂ j₂) =
-    DimPows (f l₁ l₂)
-            (f m₁ m₂)
-            (f t₁ t₂)
-            (f i₁ i₂)
-            (f th₁ th₂)
-            (f n₁ n₂)
-            (f j₁ j₂)
-
-
 --------------------------------------------------------------------------------
 -- Language of Physical Units
 --------------------------------------------------------------------------------
 
 data UnitExpParsed =
-      UENameP String DimPows
+      UENameP String (DimPows ℤ)
     | UEPrefixP ℚ UnitExpParsed
     | UEIntP ℤ
     | UEMulP UnitExpParsed UnitExpParsed
@@ -149,7 +169,7 @@ data UnitExpParsed =
       deriving Show
 
 data UnitExp =
-      UEName String DimPows
+      UEName String (DimPows ℤ)
     | UEPrefix ℚ UnitExp
     | UEMul UnitExp UnitExp
     | UEDiv UnitExp UnitExp
@@ -160,7 +180,7 @@ infixr 8 `UEPowP`, `UEPow`
 infixl 7 `UEMulP`, `UEMul`
 infixl 7 `UEDivP`, `UEDiv`
 
-unitExpDimPows ∷ UnitExp → DimPows
+unitExpDimPows ∷ UnitExp → (DimPows ℤ)
 unitExpDimPows = go
   where
     go (UEName _ d) = d
@@ -341,143 +361,113 @@ siPrefixSymbols =
 
 
 --------------------------------------------------------------------------------
--- Units
+-- Unit definitions (SI & other)
 --------------------------------------------------------------------------------
 
-uDimPows ∷ ∀ l m t i th n j α
-         . ( NumType l,  NumType m, NumType t, NumType i
-           , NumType th, NumType n, NumType j
-           )
-         ⇒ Unit (Dim l m t i th n j) α → DimPows
-uDimPows _ =
-    DimPows (toNum ((⊥) ∷ l))
-            (toNum ((⊥) ∷ m))
-            (toNum ((⊥) ∷ t))
-            (toNum ((⊥) ∷ i))
-            (toNum ((⊥) ∷ th))
-            (toNum ((⊥) ∷ n))
-            (toNum ((⊥) ∷ j))
+data UnitKind = UName | USymbol deriving (Eq, Show)
+data UnitEntry dim α =
+    UTE { uteUnit   ∷ (Unit dim α)
+        , uteKind   ∷ UnitKind
+        , uteName   ∷ String
+        , uteAllowSIPrefix ∷ Bool
+        }
 
-
--- TODO:
--- SI prefixes are not permitted (or never used) together with minute,
--- min; hour, h; day, d. This would solve the ambiguity between cd =
--- candela and cd = centiday.
--- Maybe add a Bool to the tables of units to indicate whether SI
--- prefixes are allowed?
-
-type UnitTable dim α = [(String, Unit dim α)]
-type UnitDef   dim α = (UnitTable dim α, UnitTable dim α)
-
-dimensionlessUnits ∷ (Floating α) ⇒ UnitDef DOne α
+dimensionlessUnits ∷ (Floating α) ⇒ [UnitEntry DOne α]
 dimensionlessUnits =
-  ( [ ("revolution",  one)
-    , ("solid",       one)
-    , ("degree",      degree)
-    , ("arcminute",   arcminute)
-    , ("arcsecond",   arcsecond)
-    , ("degreeOfArc", degreeOfArc)
-    , ("secondOfArc", secondOfArc)
-    , ("minuteOfArc", minuteOfArc)
-    ]
-  , [ ("°",  degree)
-    , ("'",  arcminute)
-    , ("\"", arcsecond)
-    ]
-  )
+  [ UTE one         UName   "revolution"  False
+  , UTE one         UName   "solid"       False
+  , UTE degree      UName   "degree"      False
+  , UTE degree      USymbol "°"           False
+  , UTE arcminute   UName   "arcminute"   False
+  , UTE arcminute   USymbol "'"           False
+  , UTE arcsecond   UName   "arcsecond"   False
+  , UTE arcsecond   USymbol "\""          False
+  , UTE degreeOfArc UName   "degreeOfArc" False
+  , UTE secondOfArc UName   "secondOfArc" False
+  , UTE minuteOfArc UName   "minuteOfArc" False
+  ]
 
-lengthUnits ∷ (Floating α) ⇒ UnitDef DLength α
+lengthUnits ∷ (Floating α) ⇒ [UnitEntry DLength α]
 lengthUnits =
-  ( [ ("metre",        metre)
-    , ("meter",        meter)
-    , ("foot",         foot)
-    , ("inch",         inch)
-    , ("yard",         yard)
-    , ("mile",         mile)
-    , ("nauticalMile", nauticalMile)
-    , ("ångström",     metre)
-    ]
-  , [ ("m", metre)
-    , ("Å", prefix (dec (-10)) metre)
-    ]
-  )
+  [ UTE metre        UName   "metre"         True
+  , UTE metre        USymbol "m"             True
+  , UTE metre        UName   "meter"         True
+  , UTE foot         UName   "foot"          False
+  , UTE inch         UName   "inch"          False
+  , UTE yard         UName   "yard"          False
+  , UTE mile         UName   "mile"          False
+  , UTE nauticalMile UName   "nauticalMile"  False
+  , UTE metre        UName   "ångström"      True
+  , UTE (prefix (dec (-10)) metre) USymbol "Å" True
+  ]
 
-massUnits ∷ (Floating α) ⇒ UnitDef DMass α
+massUnits ∷ (Floating α) ⇒ [UnitEntry DMass α]
 massUnits =
-  ( [ ("gram",       gram)
-    , ("poundMass",  poundMass)
-    , ("tonne",      tonne)
-    , ("metric ton", metricTon)
-    ]
-  , [ ("g",  gram)
-    , ("T",  tonne)
-    ]
-  )
+  [ UTE gram      UName   "gram"       True
+  , UTE gram      USymbol "g"          True
+  , UTE poundMass UName   "poundMass"  False
+  , UTE tonne     UName   "tonne"      False
+  , UTE tonne     USymbol "T"          False
+  , UTE metricTon UName   "metric ton" False
+  ]
 
-timeUnits ∷ (Floating α) ⇒ UnitDef DTime α
+timeUnits ∷ (Floating α) ⇒ [UnitEntry DTime α]
 timeUnits =
-  ( [ ("second",  second)
-    , ("minute",  minute)
-    , ("hour",    hour)
-    , ("day",     day)
-    , ("year",    year)
-    , ("century", century)
-    ]
-  , [ ("s",   second)
-    , ("min", minute)
-    , ("h",   hour)
-    -- , ("d",   day)
-    ]
-  )
+  [ UTE second  UName   "second"  True
+  , UTE second  USymbol "s"       True
+  , UTE minute  UName   "minute"  False
+  , UTE minute  USymbol "min"     False
+  , UTE hour    UName   "hour"    False
+  , UTE hour    USymbol "h"       False
+  , UTE day     UName   "day"     False
+  -- , UTE day     USymbol "d"       False
+  , UTE year    UName   "year"    False
+  , UTE century UName   "century" False
+  ]
 
-electricCurrentUnits ∷ (Floating α) ⇒ UnitDef DElectricCurrent α
+electricCurrentUnits ∷ (Floating α) ⇒ [UnitEntry DElectricCurrent α]
 electricCurrentUnits =
-  ( [ ("ampere", ampere)]
-  , [ ("A",      ampere)]
-  )
+  [ UTE ampere UName   "ampere" True
+  , UTE ampere USymbol "A"      True
+  ]
 
-thermodynamicTemperatureUnits ∷ (Floating α) ⇒ UnitDef DThermodynamicTemperature α
+thermodynamicTemperatureUnits ∷ (Floating α) ⇒ [UnitEntry DThermodynamicTemperature α]
 thermodynamicTemperatureUnits =
-  ( [ ("kelvin", kelvin)]
-  , [ ("K",      kelvin)]
-  )
+  [ UTE kelvin UName   "kelvin" True
+  , UTE kelvin USymbol "K"      True
+  ]
 
-amountOfSubstanceUnits ∷ (Floating α) ⇒ UnitDef DAmountOfSubstance α
+amountOfSubstanceUnits ∷ (Floating α) ⇒ [UnitEntry DAmountOfSubstance α]
 amountOfSubstanceUnits =
-  ( [ ("mole", mole)]
-  , [ ("mol",  mole)]
-  )
+  [ UTE mole UName   "mole" True
+  , UTE mole USymbol "mol"  True
+  ]
 
-luminousIntensityUnits ∷ (Floating α) ⇒ UnitDef DLuminousIntensity α
+luminousIntensityUnits ∷ (Floating α) ⇒ [UnitEntry DLuminousIntensity α]
 luminousIntensityUnits =
-  ( [ ("candela", candela)]
-  , [ ("cd",      candela)]
-  )
+  [ UTE candela UName   "candela" True
+  , UTE candela USymbol "cd"      True
+  ]
 
-baseUnitNames   ∷ [(String, DimPows)]
-baseUnitSymbols ∷ [(String, DimPows)]
-(baseUnitNames, baseUnitSymbols) =
-    ( concat [ f (fst (dimensionlessUnits            ∷ UnitDef DOne Double))
-             , f (fst (amountOfSubstanceUnits        ∷ UnitDef DAmountOfSubstance Double))
-             , f (fst (timeUnits                     ∷ UnitDef DTime Double))
-             , f (fst (lengthUnits                   ∷ UnitDef DLength Double))
-             , f (fst (massUnits                     ∷ UnitDef DMass Double))
-             , f (fst (electricCurrentUnits          ∷ UnitDef DElectricCurrent Double))
-             , f (fst (thermodynamicTemperatureUnits ∷ UnitDef DThermodynamicTemperature Double))
-             , f (fst (luminousIntensityUnits        ∷ UnitDef DLuminousIntensity Double))
-             ]
-    , concat [ f (snd (dimensionlessUnits            ∷ UnitDef DOne Double))
-             , f (snd (amountOfSubstanceUnits        ∷ UnitDef DAmountOfSubstance Double))
-             , f (snd (timeUnits                     ∷ UnitDef DTime Double))
-             , f (snd (lengthUnits                   ∷ UnitDef DLength Double))
-             , f (snd (massUnits                     ∷ UnitDef DMass Double))
-             , f (snd (electricCurrentUnits          ∷ UnitDef DElectricCurrent Double))
-             , f (snd (thermodynamicTemperatureUnits ∷ UnitDef DThermodynamicTemperature Double))
-             , f (snd (luminousIntensityUnits        ∷ UnitDef DLuminousIntensity Double))
-             ]
-    )
+filterUnits ∷ UnitKind → Bool → [(String, DimPows ℤ)]
+filterUnits unitKind allowPrefix =
+    concat [ map extract $ filter pred dimensionlessUnits
+           , map extract $ filter pred amountOfSubstanceUnits
+           , map extract $ filter pred timeUnits
+           , map extract $ filter pred lengthUnits
+           , map extract $ filter pred massUnits
+           , map extract $ filter pred electricCurrentUnits
+           , map extract $ filter pred thermodynamicTemperatureUnits
+           , map extract $ filter pred luminousIntensityUnits
+           ]
   where
-    f xs = map (Arr.second uDimPows) xs
+    pred ∷ UnitEntry dim α → Bool
+    pred ute = uteKind          ute ≡ unitKind
+             ∧ uteAllowSIPrefix ute ≡ allowPrefix
+    extract ute = (uteName ute, uDimPows $ uteUnit ute)
+
+baseUnitNames = filterUnits UName True ++ filterUnits UName False
+baseUnitSymbols = filterUnits USymbol True ++ filterUnits USymbol False
 
 unsafePUE ∷ String → UnitExp
 unsafePUE = either (error ∘ show) id ∘ parseUnitExp
@@ -535,8 +525,8 @@ derivedUnitSymbols =
   , ( "kat", unsafePUE "s⁻¹ · mol")
   ]
 
--- | Removes all subprefixes and calculates the combined prefix value
--- of the expression.
+-- | Removes all subprefixes and calculates the combined prefix value of the
+-- expression.
 normalisePrefix ∷ UnitExp → (ℚ, UnitExp)
 normalisePrefix n@(UEName _ _) = (1, n)
 normalisePrefix (UEPrefix px x) =
@@ -554,8 +544,8 @@ normalisePrefix (UEPow x i) =
     let (px, x') = normalisePrefix x
     in (px ^^ i, UEPow x' i)
 
--- | Replaces derived units with equivalent expressions using only
--- base SI units.
+-- | Replaces derived units with equivalent expressions using only base SI
+-- units.
 toBase ∷ UnitExp → UnitExp
 toBase ueName@(UEName n _) = maybe ueName id derivation
  where
@@ -577,10 +567,10 @@ toMulForm (UEPow x i) = UEPow (toMulForm x) i
 
 -- | Extract a list of units and their exponents
 -- (m·s⁻¹)² = [m², s⁻²]
-extractUnits ∷ UnitExp → Either String [((String, DimPows), ℤ)]
+extractUnits ∷ UnitExp → Either String [((String, DimPows ℤ), ℤ)]
 extractUnits ue = filter ((0 ≢) ∘ snd) <$> Map.assocs <$> go ue
   where
-    go ∷ UnitExp → Either String (Map (String, DimPows) ℤ)
+    go ∷ UnitExp → Either String (Map (String, DimPows ℤ) ℤ)
     go (UEName n d)   = pure $ Map.insert (n, d) 1 Map.empty
     go (UEMul x y)    = Map.unionWith (+) <$> go x <*> go y
     go (UEPow x n)    = Map.map (⋅ n) <$> go x
@@ -593,35 +583,54 @@ readMay s = case [x | (x,t) ← reads s, ("", "") ← lex t] of
                 [x] → Just x
                 _   → Nothing
 
-lookupUnit ∷ String → UnitDef dim α → Maybe (Unit dim α)
-lookupUnit n (names, symbols) =
-    snd <$> (find ((n ≡) ∘ fst) names <|> find ((n ≡) ∘ fst) symbols)
+lookupUnit ∷ String → [UnitEntry dim α] → Maybe (Unit dim α)
+lookupUnit n = fmap uteUnit ∘ find ((n ≡) ∘ uteName)
 
 -- | Group units by dimension.
-groupUnits ∷ [((String, DimPows), ℤ)] → Map DimPows [(String, ℤ)]
+groupUnits ∷ [((String, DimPows ℤ), ℤ)] → Map (DimPows ℤ) [(String, ℤ)]
 groupUnits = foldr (\((n, d), p) m → Map.insertWith (++) d [(n, p)] m) Map.empty
 
--- test ∷ ∀ l t α
---      . (NumType l, NumType t, Num α)
---      ⇒ Quantity (Dim l Zero t Zero Zero Zero Zero) α
--- test = 3 *~ (l Dim.* t)
---   where
---     l ∷ Unit (Dim l Zero Zero Zero Zero Zero Zero) α
---     l = (⊥)
+mulUnitsV ∷ (Num α)
+          ⇒ V x (Unit (Dim l m t i th n j) α)
+          → Unit (Dim (Mul x l)
+                       (Mul x m)
+                       (Mul x t)
+                       (Mul x i)
+                       (Mul x th)
+                       (Mul x n)
+                       (Mul x j)
+                  )
+                  α
+mulUnitsV Nil = error "empty vector"
+mulUnitsV (Cons u Nil) = u
+mulUnitsV (Cons u us)  = u Dim.* mulUnitsV us
 
---     t ∷ Unit (Dim Zero Zero t Zero Zero Zero Zero) α
---     t = (⊥)
+mulUnits ∷ ∀ α x l m t i th n j
+         . (Num α, Nat x)
+         ⇒ x
+         → [Unit (Dim l m t i th n j) α]
+         → Maybe (Unit (Dim (Mul x l)
+                             (Mul x m)
+                             (Mul x t)
+                             (Mul x i)
+                             (Mul x th)
+                             (Mul x n)
+                             (Mul x j)
+                        )
+                        α
+                  )
+mulUnits _ xs = mulUnitsV
+                <$> (vecFromList xs ∷ Maybe (V x (Unit (Dim l m t i th n j) α)))
 
 {-
-foo ∷ ∀ l m t i th n j α
-    . ( NumType l,  NumType m, NumType t, NumType i
-      , NumType th, NumType n, NumType j
-      , Read α, Num α
-      )
-    ⇒ String
-    → Either String (Quantity (Dim l m t i th n j) α)
-foo str = do
-    val ← maybe (throwError "Can't parse value") pure $ readMay valStr
+parseUnit ∷ ∀ l m t i th n j α
+          . ( NumType l,  NumType m, NumType t, NumType i
+            , NumType th, NumType n, NumType j
+            , Num α
+            )
+          ⇒ String
+          → Either String (Unit (Dim l m t i th n j) α)
+parseUnit unitStr = do
     unitExp ← either (Left ∘ show) Right $ parseUnitExp unitStr
 
     let (p, e) = normalisePrefix $ toMulForm $ toBase unitExp
@@ -637,8 +646,8 @@ foo str = do
         ns  = Map.findWithDefault [] (DimPows 0 0 0 0 0 1 0) unitDimMap
         js  = Map.findWithDefault [] (DimPows 0 0 0 0 0 0 1) unitDimMap
 
-    let os' ∷ (Floating α) ⇒ Maybe [(Unit DOne α, ℤ)]
-        os'  = sequence $ map (\(n, x) → (,x) <$> lookupUnit n dimensionlessUnits)            os
+    let os'  = sequence $ map (\(n, x) → (,x) <$> lookupUnit n dimensionlessUnits)            os
+        ls' ∷ (Floating α) ⇒ Maybe [(Unit DLength α, ℤ)]
         ls'  = sequence $ map (\(n, x) → (,x) <$> lookupUnit n lengthUnits)                   ls
         ms'  = sequence $ map (\(n, x) → (,x) <$> lookupUnit n massUnits)                     ms
         ts'  = sequence $ map (\(n, x) → (,x) <$> lookupUnit n timeUnits)                     ts
@@ -646,7 +655,8 @@ foo str = do
         ths' = sequence $ map (\(n, x) → (,x) <$> lookupUnit n thermodynamicTemperatureUnits) ths
         ns'  = sequence $ map (\(n, x) → (,x) <$> lookupUnit n amountOfSubstanceUnits)        ns
 
-    let test_os = baz unitDimMap dimensionlessUnits
+    let foo_ls ∷ Maybe (Unit (Dim l Zero Zero Zero Zero Zero Zero) α)
+        foo_ls = mulUnits ((⊥) ∷ Abs l) =<< ls'
 
     let oneUnit                      ∷ Unit (Dim Zero Zero Zero Zero Zero Zero Zero) α
         lengthUnit                   ∷ Unit (Dim l    Zero Zero Zero Zero Zero Zero) α
@@ -665,33 +675,130 @@ foo str = do
         amountOfSubstanceUnit        = (⊥)
         luminousIntensityUnit        = (⊥)
 
-    return $ val *~ (     oneUnit
-                    Dim.* lengthUnit
-                    Dim.* massUnit
-                    Dim.* timeUnit
-                    Dim.* electricCurrentUnit
-                    Dim.* thermodynamicTemperatureUnit
-                    Dim.* amountOfSubstanceUnit
-                    Dim.* luminousIntensityUnit
-                    )
+    return $ (     oneUnit
+             Dim.* lengthUnit
+             Dim.* massUnit
+             Dim.* timeUnit
+             Dim.* electricCurrentUnit
+             Dim.* thermodynamicTemperatureUnit
+             Dim.* amountOfSubstanceUnit
+             Dim.* luminousIntensityUnit
+             )
+
+parseQuantity ∷ ∀ l m t i th n j α
+              . ( NumType l,  NumType m, NumType t, NumType i
+                , NumType th, NumType n, NumType j
+                , Read α, Num α
+                )
+              ⇒ String
+              → Either String (Quantity (Dim l m t i th n j) α)
+parseQuantity str = do
+    val ← maybe (throwError "Can't parse value") pure $ readMay valStr
+    case parseUnit unitStr of
+      Left err → Left err
+      Right unit → Right $ val *~ unit
   where
     (valStr, unitStr) = Arr.second (dropWhile isSpace) $ break isSpace str
-
-baz ∷ ∀ l m t i th n j α
-    . ( NumType l,  NumType m, NumType t, NumType i
-      , NumType th, NumType n, NumType j
-      )
-    ⇒ Map DimPows [(String, ℤ)]
-    → UnitDef (Dim l m t i th n j) α
-    → Maybe [(Unit (Dim l m t i th n j) α, ℤ)]
-baz unitMap unitDef = units
-  where
-    dimPows ∷ DimPows
-    dimPows = uDimPows ((⊥) ∷ Unit (Dim l m t i th n j) α)
-
-    units ∷ Maybe [(Unit (Dim l m t i th n j) α, ℤ)]
-    units = sequence
-          $ map (\(n, x) → (,x) <$> lookupUnit n unitDef)
-          $ Map.findWithDefault [] dimPows unitMap
-
 -}
+
+--------------------------------------------------------------------------------
+-- Vector with length encoded in its type
+--------------------------------------------------------------------------------
+
+data V n α where
+  Nil ∷ V Zero α
+  Cons ∷ α → V n α → V (S n) α
+
+infixr 2 `Cons`
+
+newtype FromList a n = FromList {unFromList ∷ [a] → Maybe (V n a)}
+vecFromList ∷ ∀ a n. Nat n ⇒ [a] → Maybe (V n a)
+vecFromList = unFromList
+            $ induction (witnessNat ∷ n)
+                        (FromList fl0)
+                        (FromList ∘ flS ∘ unFromList)
+  where
+    fl0 [] = Just Nil
+    fl0 _  = Nothing
+
+    flS k [] = Nothing
+    flS k (x:xs) = Cons x <$> k xs
+
+newtype ToList a n = ToList { unToList ∷ V n a → [a] }
+vecToList ∷ ∀ n a. Nat n ⇒ V n a → [a]
+vecToList = unToList
+          $ induction (witnessNat ∷ n)
+                      (ToList tl0)
+                      (ToList ∘ tlS ∘ unToList)
+  where
+    tl0 ∷ V Z a → [a]
+    tl0 Nil = []
+    tlS ∷ ∀ x. Nat x ⇒ (V x a → [a]) → V (S x) a → [a]
+    tlS f (Cons x xs) = x : f xs
+
+
+--------------------------------------------------------------------------------
+-- Induction on natural numbers
+--------------------------------------------------------------------------------
+
+class Nat n where
+   caseNat ∷ ∀ r. n → (n ~ Z ⇒ r) → (∀ p. (n ~ S p, Nat p) ⇒ p → r) → r
+instance Nat Z where
+   caseNat _ z _ = z
+instance Nat n => Nat (S n) where
+   caseNat (S n) _ s = s n
+
+induction ∷ ∀ p n. Nat n ⇒ n → p Z → (∀ x. Nat x ⇒ p x → p (S x)) → p n
+induction n z s = caseNat n isZ isS where
+   isZ ∷ n ~ Z ⇒ p n
+   isZ = z
+
+   isS ∷ ∀ x. (n ~ S x, Nat x) ⇒ x → p n
+   isS x = s (induction x z s)
+
+newtype Witness x = Witness {unWitness ∷ x}
+witnessNat ∷ ∀ n. Nat n ⇒ n
+witnessNat = theWitness
+  where
+    theWitness = unWitness
+               $ induction ((⊥) `asTypeOf` theWitness)
+                           (Witness Z)
+                           (Witness ∘ S ∘ unWitness)
+
+
+--------------------------------------------------------------------------------
+-- Utils
+--------------------------------------------------------------------------------
+
+uDimPows ∷ ∀ l m t i th n j α β
+         . ( NumType l,  NumType m, NumType t, NumType i
+           , NumType th, NumType n, NumType j
+           , Num β
+           )
+         ⇒ Unit (Dim l m t i th n j) α → DimPows β
+uDimPows _ =
+    DimPows (toNum ((⊥) ∷ l))
+            (toNum ((⊥) ∷ m))
+            (toNum ((⊥) ∷ t))
+            (toNum ((⊥) ∷ i))
+            (toNum ((⊥) ∷ th))
+            (toNum ((⊥) ∷ n))
+            (toNum ((⊥) ∷ j))
+
+decodeRLE ∷ [(α, ℤ)] → [α]
+decodeRLE = concatMap (\(x, n) → genericReplicate n x)
+
+
+--------------------------------------------------------------------------------
+-- Debug
+--------------------------------------------------------------------------------
+
+-- test ∷ String → IO ()
+-- test str = printf "%s\nPrefix: %s\n  %s\n"
+--                   (show d)
+--                   (show p)
+--                   (intercalate "\n  " $ map show us)
+--   where
+--     us = either error id $ extractUnits e
+--     d = unitExpDimPows e
+--     (p, e) = normalisePrefix $ toMulForm $ toBase $ unsafePUE str
