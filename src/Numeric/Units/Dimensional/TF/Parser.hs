@@ -259,11 +259,13 @@ unitExp = buildExpressionParser table term
 unitTerm ∷ Parsec String () UnitExpParsed
 unitTerm = try onlyNames <|> onlySymbols
   where
-    onlyNames   = unit siPrefixNames   unitNames
-    onlySymbols = unit siPrefixSymbols unitSymbols
+    onlyNames   =   try (unit siPrefixNames (filterUnits UName True))
+                <|> try (unit siPrefixNames (filterDerivedUnits UName))
+                <|> unitName (filterUnits UName False)
 
-    unitNames   = baseUnitNames   ++ map (Arr.second unitExpDimPows) derivedUnitNames
-    unitSymbols = baseUnitSymbols ++ map (Arr.second unitExpDimPows) derivedUnitSymbols
+    onlySymbols =   try (unit siPrefixSymbols (filterUnits USymbol True))
+                <|> try (unit siPrefixSymbols (filterDerivedUnits USymbol))
+                <|> unitName (filterUnits USymbol False)
 
     unit prefixTable unitTable =
         try (prefixedUnit prefixTable unitTable)
@@ -366,87 +368,92 @@ siPrefixSymbols =
 
 data UnitKind = UName | USymbol deriving (Eq, Show)
 data UnitEntry dim α =
-    UTE { uteUnit   ∷ (Unit dim α)
-        , uteKind   ∷ UnitKind
-        , uteName   ∷ String
-        , uteAllowSIPrefix ∷ Bool
+    UE { ueUnit          ∷ Unit dim α
+       , ueKind          ∷ UnitKind
+       , ueName          ∷ String
+       , ueAllowSIPrefix ∷ Bool
+       }
+data DerivedUnitEntry =
+    DUE { dueKind       ∷ UnitKind
+        , dueName       ∷ String
+        , dueDerivation ∷ UnitExp
         }
 
 dimensionlessUnits ∷ (Floating α) ⇒ [UnitEntry DOne α]
 dimensionlessUnits =
-  [ UTE one         UName   "revolution"  False
-  , UTE one         UName   "solid"       False
-  , UTE degree      UName   "degree"      False
-  , UTE degree      USymbol "°"           False
-  , UTE arcminute   UName   "arcminute"   False
-  , UTE arcminute   USymbol "'"           False
-  , UTE arcsecond   UName   "arcsecond"   False
-  , UTE arcsecond   USymbol "\""          False
-  , UTE degreeOfArc UName   "degreeOfArc" False
-  , UTE secondOfArc UName   "secondOfArc" False
-  , UTE minuteOfArc UName   "minuteOfArc" False
+  [ UE one         UName   "revolution"  False
+  , UE one         UName   "solid"       False
+  , UE degree      UName   "degree"      False
+  , UE degree      USymbol "°"           False
+  , UE arcminute   UName   "arcminute"   False
+  , UE arcminute   USymbol "'"           False
+  , UE arcsecond   UName   "arcsecond"   False
+  , UE arcsecond   USymbol "\""          False
+  , UE degreeOfArc UName   "degreeOfArc" False
+  , UE secondOfArc UName   "secondOfArc" False
+  , UE minuteOfArc UName   "minuteOfArc" False
   ]
 
 lengthUnits ∷ (Floating α) ⇒ [UnitEntry DLength α]
 lengthUnits =
-  [ UTE metre        UName   "metre"         True
-  , UTE metre        USymbol "m"             True
-  , UTE metre        UName   "meter"         True
-  , UTE foot         UName   "foot"          False
-  , UTE inch         UName   "inch"          False
-  , UTE yard         UName   "yard"          False
-  , UTE mile         UName   "mile"          False
-  , UTE nauticalMile UName   "nauticalMile"  False
-  , UTE metre        UName   "ångström"      True
-  , UTE (prefix (dec (-10)) metre) USymbol "Å" True
+  [ UE metre        UName   "metre"         True
+  , UE metre        USymbol "m"             True
+  , UE metre        UName   "meter"         True
+  , UE foot         UName   "foot"          False
+  , UE inch         UName   "inch"          False
+  , UE yard         UName   "yard"          False
+  , UE mile         UName   "mile"          False
+  , UE nauticalMile UName   "nauticalMile"  False
+  , UE metre        UName   "ångström"      True
+  , UE (prefix (dec (-10)) metre) USymbol "Å" True
   ]
 
 massUnits ∷ (Floating α) ⇒ [UnitEntry DMass α]
 massUnits =
-  [ UTE gram      UName   "gram"       True
-  , UTE gram      USymbol "g"          True
-  , UTE poundMass UName   "poundMass"  False
-  , UTE tonne     UName   "tonne"      False
-  , UTE tonne     USymbol "T"          False
-  , UTE metricTon UName   "metric ton" False
+  [ UE gram      UName   "gram"       True
+  , UE gram      USymbol "g"          True
+  , UE poundMass UName   "poundMass"  False
+  , UE tonne     UName   "tonne"      False
+  , UE tonne     USymbol "T"          False
+  , UE metricTon UName   "metric ton" False
   ]
 
 timeUnits ∷ (Floating α) ⇒ [UnitEntry DTime α]
 timeUnits =
-  [ UTE second  UName   "second"  True
-  , UTE second  USymbol "s"       True
-  , UTE minute  UName   "minute"  False
-  , UTE minute  USymbol "min"     False
-  , UTE hour    UName   "hour"    False
-  , UTE hour    USymbol "h"       False
-  , UTE day     UName   "day"     False
-  -- , UTE day     USymbol "d"       False
-  , UTE year    UName   "year"    False
-  , UTE century UName   "century" False
+  [ UE second  UName   "second"  True
+  , UE second  USymbol "s"       True
+  , UE minute  UName   "minute"  False
+  , UE minute  USymbol "min"     False
+  , UE hour    UName   "hour"    False
+  , UE hour    USymbol "h"       False
+  , UE day     UName   "day"     False
+  , UE day     USymbol "d"       False
+  , UE year    UName   "year"    False
+  , UE century UName   "century" False
   ]
 
 electricCurrentUnits ∷ (Floating α) ⇒ [UnitEntry DElectricCurrent α]
 electricCurrentUnits =
-  [ UTE ampere UName   "ampere" True
-  , UTE ampere USymbol "A"      True
+  [ UE ampere UName   "ampere" True
+  , UE ampere USymbol "A"      True
   ]
 
 thermodynamicTemperatureUnits ∷ (Floating α) ⇒ [UnitEntry DThermodynamicTemperature α]
 thermodynamicTemperatureUnits =
-  [ UTE kelvin UName   "kelvin" True
-  , UTE kelvin USymbol "K"      True
+  [ UE kelvin UName   "kelvin" True
+  , UE kelvin USymbol "K"      True
   ]
 
 amountOfSubstanceUnits ∷ (Floating α) ⇒ [UnitEntry DAmountOfSubstance α]
 amountOfSubstanceUnits =
-  [ UTE mole UName   "mole" True
-  , UTE mole USymbol "mol"  True
+  [ UE mole UName   "mole" True
+  , UE mole USymbol "mol"  True
   ]
 
 luminousIntensityUnits ∷ (Floating α) ⇒ [UnitEntry DLuminousIntensity α]
 luminousIntensityUnits =
-  [ UTE candela UName   "candela" True
-  , UTE candela USymbol "cd"      True
+  [ UE candela UName   "candela" True
+  , UE candela USymbol "cd"      True
   ]
 
 filterUnits ∷ UnitKind → Bool → [(String, DimPows ℤ)]
@@ -462,9 +469,14 @@ filterUnits unitKind allowPrefix =
            ]
   where
     pred ∷ UnitEntry dim α → Bool
-    pred ute = uteKind          ute ≡ unitKind
-             ∧ uteAllowSIPrefix ute ≡ allowPrefix
-    extract ute = (uteName ute, uDimPows $ uteUnit ute)
+    pred ue = ueKind          ue ≡ unitKind
+             ∧ ueAllowSIPrefix ue ≡ allowPrefix
+    extract ue = (ueName ue, uDimPows $ ueUnit ue)
+
+filterDerivedUnits ∷ UnitKind → [(String, DimPows ℤ)]
+filterDerivedUnits unitKind =
+    map (\due → (dueName due, unitExpDimPows $ dueDerivation due))
+    $ filter ((unitKind ≡) ∘ dueKind) derivedUnits
 
 baseUnitNames = filterUnits UName True ++ filterUnits UName False
 baseUnitSymbols = filterUnits USymbol True ++ filterUnits USymbol False
@@ -472,57 +484,53 @@ baseUnitSymbols = filterUnits USymbol True ++ filterUnits USymbol False
 unsafePUE ∷ String → UnitExp
 unsafePUE = either (error ∘ show) id ∘ parseUnitExp
 
-derivedUnitNames ∷ [(String, UnitExp)]
-derivedUnitNames =
-  [ ("radian",         unsafePUE "metre / metre")
-  , ("steradian",      unsafePUE "metre² / metre²")
-  , ("hertz",          unsafePUE "second⁻¹")
-  , ("newton",         unsafePUE "metre · kilogram · second⁻²")
-  , ("pascal",         unsafePUE "metre⁻¹ · kilogram · second⁻²")
-  , ("joule",          unsafePUE "metre² · kilogram · second⁻²")
-  , ("watt",           unsafePUE "metre² · kilogram · second⁻³")
-  , ("coulomb",        unsafePUE "second · ampere")
-  , ("volt",           unsafePUE "metre² · kilogram · second⁻³ · ampere⁻¹")
-  , ("farad",          unsafePUE "metre⁻² · kilogram⁻¹ · second⁴ · ampere²")
-  , ("ohm",            unsafePUE "metre² · kilogram · second⁻³ · ampere⁻²")
-  , ("siemens",        unsafePUE "metre⁻² · kilogram⁻¹ · second³ · ampere²")
-  , ("weber",          unsafePUE "metre² · kilogram · second⁻² · ampere⁻¹")
-  , ("tesla",          unsafePUE "kilogram · second⁻² · ampere⁻¹")
-  , ("henry",          unsafePUE "metre² · kilogram · second⁻² · ampere⁻²")
-  , ("degree Celsius", unsafePUE "kelvin")
-  , ("lumen",          unsafePUE "candela")
-  , ("lux",            unsafePUE "metre² · candela")
-  , ("becquerel",      unsafePUE "second⁻¹")
-  , ("gray",           unsafePUE "metre² · second⁻²")
-  , ("sievert",        unsafePUE "metre² · second⁻²")
-  , ("katal",          unsafePUE "second⁻¹ · mole")
-  ]
-
-derivedUnitSymbols ∷ [(String, UnitExp)]
-derivedUnitSymbols =
-  [ ( "rad", unsafePUE "m / m")
-  , ( "sr",  unsafePUE "m² / m²")
-  , ( "Hz",  unsafePUE "s⁻¹")
-  , ( "N",   unsafePUE "m · kg · s⁻²")
-  , ( "Pa",  unsafePUE "m⁻¹ · kg · s⁻²")
-  , ( "J",   unsafePUE "m² · kg · s⁻²")
-  , ( "W",   unsafePUE "m² · kg · s⁻³")
-  , ( "C",   unsafePUE "s · A")
-  , ( "V",   unsafePUE "m² · kg · s⁻³ · A⁻¹")
-  , ( "F",   unsafePUE "m⁻² · kg⁻¹ · s⁴ · A²")
-  , ( "Ω",   unsafePUE "m² · kg · s⁻³ · A⁻²")
-  , ( "S",   unsafePUE "m⁻² · kg⁻¹ · s³ · A²")
-  , ( "Wb",  unsafePUE "m² · kg · s⁻² · A⁻¹")
-  , ( "T",   unsafePUE "kg · s⁻² · A⁻¹")
-  , ( "H",   unsafePUE "m² · kg · s⁻² · A⁻²")
-  , ( "℃",   unsafePUE "K")
-  , ( "°C",  unsafePUE "K")
-  , ( "lm",  unsafePUE "cd")
-  , ( "lx",  unsafePUE "m⁻² · cd")
-  , ( "Bq",  unsafePUE "s⁻¹")
-  , ( "Gy",  unsafePUE "m² · s⁻²")
-  , ( "Sv",  unsafePUE "m² · s⁻²")
-  , ( "kat", unsafePUE "s⁻¹ · mol")
+derivedUnits ∷ [DerivedUnitEntry]
+derivedUnits =
+  [ DUE UName "radian"    $ unsafePUE "metre / metre"
+  , DUE UName "steradian" $ unsafePUE "metre² / metre²"
+  , DUE UName "hertz"     $ unsafePUE "second⁻¹"
+  , DUE UName "newton"    $ unsafePUE "metre · kilogram · second⁻²"
+  , DUE UName "pascal"    $ unsafePUE "metre⁻¹ · kilogram · second⁻²"
+  , DUE UName "joule"     $ unsafePUE "metre² · kilogram · second⁻²"
+  , DUE UName "watt"      $ unsafePUE "metre² · kilogram · second⁻³"
+  , DUE UName "coulomb"   $ unsafePUE "second · ampere"
+  , DUE UName "volt"      $ unsafePUE "metre² · kilogram · second⁻³ · ampere⁻¹"
+  , DUE UName "farad"     $ unsafePUE "metre⁻² · kilogram⁻¹ · second⁴ · ampere²"
+  , DUE UName "ohm"       $ unsafePUE "metre² · kilogram · second⁻³ · ampere⁻²"
+  , DUE UName "siemens"   $ unsafePUE "metre⁻² · kilogram⁻¹ · second³ · ampere²"
+  , DUE UName "weber"     $ unsafePUE "metre² · kilogram · second⁻² · ampere⁻¹"
+  , DUE UName "tesla"     $ unsafePUE "kilogram · second⁻² · ampere⁻¹"
+  , DUE UName "henry"     $ unsafePUE "metre² · kilogram · second⁻² · ampere⁻²"
+  , DUE UName "degree Celsius" $ unsafePUE "kelvin"
+  , DUE UName "lumen"     $ unsafePUE "candela"
+  , DUE UName "lux"       $ unsafePUE "metre² · candela"
+  , DUE UName "becquerel" $ unsafePUE "second⁻¹"
+  , DUE UName "gray"      $ unsafePUE "metre² · second⁻²"
+  , DUE UName "sievert"   $ unsafePUE "metre² · second⁻²"
+  , DUE UName "katal"     $ unsafePUE "second⁻¹ · mole"
+  , DUE USymbol "rad"     $ unsafePUE "m / m"
+  , DUE USymbol "sr"      $ unsafePUE "m² / m²"
+  , DUE USymbol "Hz"      $ unsafePUE "s⁻¹"
+  , DUE USymbol "N"       $ unsafePUE "m · kg · s⁻²"
+  , DUE USymbol "Pa"      $ unsafePUE "m⁻¹ · kg · s⁻²"
+  , DUE USymbol "J"       $ unsafePUE "m² · kg · s⁻²"
+  , DUE USymbol "W"       $ unsafePUE "m² · kg · s⁻³"
+  , DUE USymbol "C"       $ unsafePUE "s · A"
+  , DUE USymbol "V"       $ unsafePUE "m² · kg · s⁻³ · A⁻¹"
+  , DUE USymbol "F"       $ unsafePUE "m⁻² · kg⁻¹ · s⁴ · A²"
+  , DUE USymbol "Ω"       $ unsafePUE "m² · kg · s⁻³ · A⁻²"
+  , DUE USymbol "S"       $ unsafePUE "m⁻² · kg⁻¹ · s³ · A²"
+  , DUE USymbol "Wb"      $ unsafePUE "m² · kg · s⁻² · A⁻¹"
+  , DUE USymbol "T"       $ unsafePUE "kg · s⁻² · A⁻¹"
+  , DUE USymbol "H"       $ unsafePUE "m² · kg · s⁻² · A⁻²"
+  , DUE USymbol "℃"       $ unsafePUE "K"
+  , DUE USymbol "°C"      $ unsafePUE "K"
+  , DUE USymbol "lm"      $ unsafePUE "cd"
+  , DUE USymbol "lx"      $ unsafePUE "m⁻² · cd"
+  , DUE USymbol "Bq"      $ unsafePUE "s⁻¹"
+  , DUE USymbol "Gy"      $ unsafePUE "m² · s⁻²"
+  , DUE USymbol "Sv"      $ unsafePUE "m² · s⁻²"
+  , DUE USymbol "kat"     $ unsafePUE "s⁻¹ · mol"
   ]
 
 -- | Removes all subprefixes and calculates the combined prefix value of the
@@ -550,7 +558,7 @@ toBase ∷ UnitExp → UnitExp
 toBase ueName@(UEName n _) = maybe ueName id derivation
  where
    derivation ∷ Maybe UnitExp
-   derivation = snd <$> find ((n ≡) ∘ fst) (derivedUnitNames ++ derivedUnitSymbols)
+   derivation = dueDerivation <$> find ((n ≡) ∘ dueName) derivedUnits
 toBase (UEPrefix p x) = UEPrefix p (toBase x)
 toBase (UEMul x y) = UEMul (toBase x) (toBase y)
 toBase (UEDiv x y) = UEDiv (toBase x) (toBase y)
@@ -584,7 +592,7 @@ readMay s = case [x | (x,t) ← reads s, ("", "") ← lex t] of
                 _   → Nothing
 
 lookupUnit ∷ String → [UnitEntry dim α] → Maybe (Unit dim α)
-lookupUnit n = fmap uteUnit ∘ find ((n ≡) ∘ uteName)
+lookupUnit n = fmap ueUnit ∘ find ((n ≡) ∘ ueName)
 
 -- | Group units by dimension.
 groupUnits ∷ [((String, DimPows ℤ), ℤ)] → Map (DimPows ℤ) [(String, ℤ)]
